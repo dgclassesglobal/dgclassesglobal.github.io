@@ -1,0 +1,5 @@
+User-Agent: *
+Allow: /
+
+Host: https://dgclassesglobal.github.io
+Sitemap: https://dgclassesglobal.github.io/sitemap.xml
