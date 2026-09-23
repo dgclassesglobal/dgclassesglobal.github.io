@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+.DS_Store
+*.log
+.vercel
+image-search
+Unselected files
+tsconfig.tsbuildinfo
