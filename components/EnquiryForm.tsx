@@ -15,6 +15,12 @@ type Fields = {
 
 const empty: Fields = { name: "", email: "", mobile: "", course: "", subject: "", message: "" };
 
+// Web3Forms posts the enquiry straight to the DG Classes inbox.
+// Set NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY when building to enable it.
+// Without a key the form keeps the WhatsApp/email handoff.
+const WEB3FORMS_ACCESS_KEY = process.env.NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY ?? "";
+const web3formsEnabled = WEB3FORMS_ACCESS_KEY.trim().length > 0;
+
 function validate(values: Fields) {
   const errors: Partial<Record<keyof Fields, string>> = {};
   if (values.name.trim().length < 2) errors.name = "Please enter your name.";
@@ -41,7 +47,7 @@ function enquiryText(values: Fields) {
 
 export function EnquiryForm({
   heading = "Ready to take the next step?",
-  text = "Tell us the course you have in mind. Your enquiry opens in WhatsApp or email so it reaches the DG Classes numbers already published on the website.",
+  text,
   intent,
   defaultCourse = "",
 }: {
@@ -50,9 +56,14 @@ export function EnquiryForm({
   intent?: string;
   defaultCourse?: string;
 }) {
+  const introText =
+    text ??
+    (web3formsEnabled
+      ? "Tell us the course you have in mind. Your enquiry goes straight to the DG Classes inbox and the team will call or email you back."
+      : "Tell us the course you have in mind. Your enquiry opens in WhatsApp or email so it reaches the DG Classes numbers already published on the website.");
   const [values, setValues] = useState<Fields>(empty);
   const [errors, setErrors] = useState<Partial<Record<keyof Fields, string>>>({});
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "success" | "error">("idle");
   const [prepared, setPrepared] = useState("");
 
   useEffect(() => {
@@ -77,7 +88,7 @@ export function EnquiryForm({
     setStatus("idle");
   }
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const asDemo = submitter?.value === "demo";
@@ -97,6 +108,34 @@ export function EnquiryForm({
     }
     const body = enquiryText(nextValues);
     setPrepared(body);
+
+    if (web3formsEnabled) {
+      setStatus("sending");
+      try {
+        const response = await fetch("https://api.web3forms.com/submit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            access_key: WEB3FORMS_ACCESS_KEY,
+            subject: `Website enquiry: ${nextValues.subject.trim()}`,
+            from_name: "DG Classes Global Website",
+            name: nextValues.name.trim(),
+            email: nextValues.email.trim(),
+            mobile: nextValues.mobile.trim(),
+            course: nextValues.course,
+            message: body,
+          }),
+        });
+        const result = (await response.json().catch(() => null)) as { success?: boolean } | null;
+        if (response.ok && result?.success) {
+          setStatus("sent");
+          return;
+        }
+      } catch {
+        // Network or API problem — fall back to the WhatsApp handoff below.
+      }
+    }
+
     setStatus("success");
     window.open(whatsappLink(body), "_blank", "noopener,noreferrer");
   }
@@ -105,9 +144,31 @@ export function EnquiryForm({
     <div id="enquire" className="panel scroll-mt-28 p-5 sm:p-8">
       <p className="eyebrow">Enquiry</p>
       <h2 className="section-title mt-3 text-[2rem]">{heading}</h2>
-      <p className="lede mt-3">{text}</p>
+      <p className="lede mt-3">{introText}</p>
 
-      {status === "success" ? (
+      {status === "sent" ? (
+        <div className="mt-6 rounded-2xl border border-line bg-brand-light p-5 text-ink" role="status">
+          <p className="font-semibold">Thank you — your enquiry has been sent.</p>
+          <p className="mt-2 text-sm">
+            The DG Classes team has received your details and will call or email you back. For an immediate reply you can also message us on WhatsApp.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <a className="btn btn-primary" href={whatsappLink(prepared)} target="_blank" rel="noreferrer">
+              Chat on WhatsApp
+            </a>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                setValues(empty);
+                setStatus("idle");
+              }}
+            >
+              Send another enquiry
+            </button>
+          </div>
+        </div>
+      ) : status === "success" ? (
         <div className="mt-6 rounded-2xl border border-line bg-brand-light p-5 text-ink" role="status">
           <p className="font-semibold">Your enquiry is ready to send.</p>
           <p className="mt-2 text-sm">
@@ -168,10 +229,10 @@ export function EnquiryForm({
             </p>
           ) : null}
           <div className="flex flex-wrap gap-3">
-            <button type="submit" className="btn btn-primary" value="enquire">
-              Enquire Now
+            <button type="submit" className="btn btn-primary" value="enquire" disabled={status === "sending"}>
+              {status === "sending" ? "Sending…" : "Enquire Now"}
             </button>
-            <button type="submit" className="btn btn-secondary" value="demo">
+            <button type="submit" className="btn btn-secondary" value="demo" disabled={status === "sending"}>
               Book a Demo Class
             </button>
           </div>
