@@ -7,3 +7,4 @@ out
 image-search
 Unselected files
 tsconfig.tsbuildinfo
+.env*.local
