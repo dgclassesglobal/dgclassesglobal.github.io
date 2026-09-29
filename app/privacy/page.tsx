@@ -13,7 +13,7 @@ export default function PrivacyPage() {
       <h1 className="section-title">Privacy</h1>
       <div className="prose-dg mt-6">
         <p>
-          This website is a static presentation of DG Classes Global. The enquiry form does not save your details on a server run by this site. When you submit, the message is prepared for WhatsApp ({site.whatsappDisplay}) or email ({site.email}), and you send it yourself.
+          This website is a static presentation of DG Classes Global. The enquiry form does not save your details on a server run by this site. When you submit it, your details are sent through Web3Forms, a third-party form service, which delivers them to DG Classes by email. You can also contact us directly on WhatsApp ({site.whatsappDisplay}) or by email ({site.email}).
         </p>
         <p>
           Please do not include sensitive documents in the form. For questions about information already held by the institute, write to {site.email} or use the phone numbers on the contact page.

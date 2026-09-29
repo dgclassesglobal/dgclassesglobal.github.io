@@ -2,7 +2,11 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { courseOptions } from "@/lib/courses";
-import { mailtoLink, site, whatsappLink } from "@/lib/site";
+import { site, whatsappLink } from "@/lib/site";
+
+const WEB3FORMS_ENDPOINT = "https://api.web3forms.com/submit";
+// Inlined at build time. In GitHub Actions it comes from the WEB3FORMS_ACCESS_KEY repository secret.
+const WEB3FORMS_ACCESS_KEY = process.env.NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY ?? "";
 
 type Fields = {
   name: string;
@@ -26,22 +30,24 @@ function validate(values: Fields) {
   return errors;
 }
 
-function enquiryText(values: Fields) {
-  return [
-    "Hello DG Classes Global, I would like to enquire.",
-    "",
-    `Name: ${values.name.trim()}`,
-    `Email: ${values.email.trim()}`,
-    `Mobile: ${values.mobile.trim()}`,
-    `Course: ${values.course}`,
-    `Subject: ${values.subject.trim()}`,
-    `Message: ${values.message.trim()}`,
-  ].join("\n");
+function enquiryFormData(values: Fields, asDemo: boolean) {
+  const data = new FormData();
+  data.append("access_key", WEB3FORMS_ACCESS_KEY);
+  data.append("subject", `Website enquiry: ${values.subject.trim()} – ${values.course}`);
+  data.append("from_name", `${site.name} website`);
+  data.append("name", values.name.trim());
+  data.append("email", values.email.trim());
+  data.append("mobile", values.mobile.trim());
+  data.append("course", values.course);
+  data.append("enquiry_type", asDemo ? "Demo class" : "General enquiry");
+  data.append("message", values.message.trim());
+  data.append("page", window.location.href);
+  return data;
 }
 
 export function EnquiryForm({
   heading = "Ready to take the next step?",
-  text = "Tell us the course you have in mind. Your enquiry opens in WhatsApp or email so it reaches the DG Classes numbers already published on the website.",
+  text = "Tell us the course you have in mind. Your enquiry goes straight to the DG Classes team, who will get back to you by email or phone.",
   intent,
   defaultCourse = "",
 }: {
@@ -52,8 +58,9 @@ export function EnquiryForm({
 }) {
   const [values, setValues] = useState<Fields>(empty);
   const [errors, setErrors] = useState<Partial<Record<keyof Fields, string>>>({});
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
-  const [prepared, setPrepared] = useState("");
+  // "error" = validation problems, "failed" = the enquiry could not be sent.
+  const [status, setStatus] = useState<"idle" | "sending" | "success" | "error" | "failed">("idle");
+  const [action, setAction] = useState<"enquire" | "demo">("enquire");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -74,11 +81,12 @@ export function EnquiryForm({
   function update(key: keyof Fields, value: string) {
     setValues((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: undefined }));
-    setStatus("idle");
+    setStatus((current) => (current === "sending" ? current : "idle"));
   }
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (status === "sending") return;
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const asDemo = submitter?.value === "demo";
     const nextValues = asDemo
@@ -95,11 +103,38 @@ export function EnquiryForm({
       setStatus("error");
       return;
     }
-    const body = enquiryText(nextValues);
-    setPrepared(body);
-    setStatus("success");
-    window.open(whatsappLink(body), "_blank", "noopener,noreferrer");
+    if (!WEB3FORMS_ACCESS_KEY) {
+      console.error("Web3Forms access key is missing. Set NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY when building the site.");
+      setStatus("failed");
+      return;
+    }
+
+    setAction(asDemo ? "demo" : "enquire");
+    setStatus("sending");
+    try {
+      const response = await fetch(WEB3FORMS_ENDPOINT, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: enquiryFormData(nextValues, asDemo),
+      });
+      const result = (await response.json().catch(() => null)) as { success?: boolean; message?: string } | null;
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || `Web3Forms responded with HTTP ${response.status}`);
+      }
+      setStatus("success");
+    } catch (error) {
+      console.error("Enquiry could not be sent:", error);
+      setStatus("failed");
+    }
   }
+
+  function startAgain() {
+    setValues((current) => ({ ...empty, course: current.course }));
+    setErrors({});
+    setStatus("idle");
+  }
+
+  const sending = status === "sending";
 
   return (
     <div id="enquire" className="panel scroll-mt-28 p-5 sm:p-8">
@@ -109,24 +144,18 @@ export function EnquiryForm({
 
       {status === "success" ? (
         <div className="mt-6 rounded-2xl border border-line bg-brand-light p-5 text-ink" role="status">
-          <p className="font-semibold">Your enquiry is ready to send.</p>
+          <p className="font-semibold">Thank you. Your enquiry has been sent.</p>
           <p className="mt-2 text-sm">
-            WhatsApp should have opened with your message to {site.whatsappDisplay}. If it did not, use the buttons below. This page does not store the form on a server.
+            The DG Classes team will get back to you soon on the email address or mobile number you shared.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
-            <a className="btn btn-primary" href={whatsappLink(prepared)} target="_blank" rel="noreferrer">
-              Open WhatsApp
-            </a>
-            <a className="btn btn-secondary" href={mailtoLink(values.subject, prepared)}>
-              Email instead
-            </a>
-            <button type="button" className="btn btn-ghost" onClick={() => setStatus("idle")}>
-              Edit details
+            <button type="button" className="btn btn-secondary" onClick={startAgain}>
+              Send another enquiry
             </button>
           </div>
         </div>
       ) : (
-        <form className="mt-6 grid gap-4" onSubmit={submit} noValidate>
+        <form className="mt-6 grid gap-4" onSubmit={submit} noValidate aria-busy={sending}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name" name="name" value={values.name} error={errors.name} onChange={update} autoComplete="name" />
             <Field label="Email" name="email" type="email" value={values.email} error={errors.email} onChange={update} autoComplete="email" />
@@ -167,12 +196,25 @@ export function EnquiryForm({
               Please correct the highlighted fields.
             </p>
           ) : null}
+          {status === "failed" ? (
+            <p className="error-text" role="alert">
+              Sorry, your enquiry could not be sent. Please try again, or contact us on{" "}
+              <a className="underline" href={whatsappLink("Hello DG Classes Global, I would like to enquire.")} target="_blank" rel="noreferrer">
+                WhatsApp ({site.whatsappDisplay})
+              </a>{" "}
+              or at{" "}
+              <a className="underline" href={`mailto:${site.email}`}>
+                {site.email}
+              </a>
+              .
+            </p>
+          ) : null}
           <div className="flex flex-wrap gap-3">
-            <button type="submit" className="btn btn-primary" value="enquire">
-              Enquire Now
+            <button type="submit" className="btn btn-primary disabled:cursor-wait disabled:opacity-70" value="enquire" disabled={sending}>
+              {sending && action === "enquire" ? "Sending…" : "Enquire Now"}
             </button>
-            <button type="submit" className="btn btn-secondary" value="demo">
-              Book a Demo Class
+            <button type="submit" className="btn btn-secondary disabled:cursor-wait disabled:opacity-70" value="demo" disabled={sending}>
+              {sending && action === "demo" ? "Sending…" : "Book a Demo Class"}
             </button>
           </div>
         </form>

@@ -30,7 +30,13 @@ jobs:
       - name: Install
         run: npm ci
       - name: Build
-        run: npm run build
+        env:
+          NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_WEB3FORMS_ACCESS_KEY" ]; then
+            echo "::warning title=Web3Forms::The WEB3FORMS_ACCESS_KEY repository secret is not set, so the enquiry form cannot send."
+          fi
+          npm run build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
